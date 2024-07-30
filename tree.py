@@ -7,10 +7,6 @@ import sqlite3
 import os
 import sys
 
-level5 = [
-'MMMMMFMMFFFM'
-]
-
 contract = (21, 62)
 center = ('', 681, 550)
     
@@ -70,7 +66,7 @@ pattern = re.compile('^[A-Z1-9]{4}-[A-Z1-9]{3}$') # for code
 
 found = False
 for window in pg.getAllWindows():
-    if re.search('^Dr. John.*', window.title):
+    if re.search('^Home • FamilySearch.*', window.title):
         found = True
         window.activate()
         time.sleep(1)
@@ -88,22 +84,52 @@ else:
     print ('New db created')
 #sys.exit()
 
-def insert(tup):
-    try: cursor.execute('insert into tree (chain, code, name, birth_date, birth_place, death_date, death_place) values (?, ?, ?, ?, ?, ?, ?)', tup)
-    except sqlite3.IntegrityError as e: print(f'Error: {e}', tup[0])
-    connection.commit()
-
-def get_code(chain): # returns code string or empty string if no code found
-    code = cursor.execute("select code from tree where chain = '" + chain + "'").fetchone()
-    if code == None: return ''
-    return code[0]
-
-def get_count():
-    print('#ancestors:', cursor.execute('select count(*) from tree').fetchone()[0])
-
 def crash(mess):
     print(mess); sys.exit()
     
+def insert(tup):
+    def insertcc(cc):
+        try: cursor.execute('insert into chains (chain, code) values (?, ?)', cc)
+        except sqlite3.IntegrityError as e: print(f'Chain already exists: {cc[0]}')
+        
+    chain = tup[0:1][0]
+    code = tup[1:2][0]
+    result = cursor.execute('select code from tree where code = ?', (code,)).fetchone()
+    if result == None:
+        #print('ancestor does not exist, adding', code, chain)
+        cursor.execute('insert into tree (code, name, birth_date, birth_place, death_date, death_place) values (?, ?, ?, ?, ?, ?)', tup[1:])
+        insertcc(tup[:2])
+        connection.commit()
+        return([])
+    # ancestor already existed; add every ancestor further up the tree
+    #print('ancestor existed', code, chain)
+    bases = cursor.execute("select chain from chains where code = ?", (code,)).fetchall()
+    ccss = []
+    for bs in bases:
+        ccs = cursor.execute("select chain, code from chains where chain like ?", (f'{bs[0]}%',)).fetchall()
+        ccs = [(cs[0][len(bs[0]):], cs[1]) for cs in ccs] # strip base
+        ccss += ccs
+    ccss = list(set(ccss)) # removes duplicates
+    ret = []
+    for ccs in ccss:
+        if ccs[1] == code: continue
+        ch = chain + ccs[0]
+        # print('adding:', *ccs, ch)
+        insertcc((ch, ccs[1]))
+        ret.append(ch)
+    connection.commit()
+    return(ret)
+
+def get_code(chain): # returns code string or empty string if no code found
+    code = cursor.execute("select code from chains where chain = '" + chain + "'").fetchone()
+    if code == None: return ''
+    return code[0]
+
+def get_counts():
+    def get_count(table):
+        return(cursor.execute(f'select count(*) from {table}').fetchone()[0])
+    print('#ancestors:', get_count('tree'), get_count('chains'))
+
 def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple, could be ()
     pc.copy('xyzzy')
     pg.click(x, y); time.sleep(0.4) # open detail popup
@@ -186,12 +212,15 @@ def gray(x, y):
     return(False)
     
 def fan(origin): # insert the details of every ancestor in the fan into the db
+    skip = []
     for ch, x, y in sectors:
+        chain = origin + ch
+        if chain in skip: continue
         color = pg.pixel(x, y) # returns RGB triplet
         if gray(x, y): continue
         tup = grab(x, y, False)
-        if len(tup) > 0: insert((origin + ch,) + tup)
-        get_count()
+        if len(tup) > 0: skip = insert((chain,) + tup)
+    get_counts()
 
 def grab_center(code): # crash upon fail
     for round in range(4): # three tries
@@ -210,12 +239,18 @@ if not is_db: # grab and insert home
     insert(('',) + tup)
     fan('')
 
-for i in range(427, 436): #436
+start = 80
+step = 10
+with open('level5.csv', 'r') as file: lines = file.readlines()
+print("Leve5", len(lines))
+level5 = [line.rstrip('\n') for line in lines[start:start + step]]
+print(f"Level5: {start} to {start + step - 1} inclusive")
+for i in range(0, step):
     base = level5[i]
     if len(base) % 4 != 0 or not bool(re.match(r'[FM]*$', base)): crash('bad base')
     # load base fan
     base_code = get_code(base)
-    print(base, base_code)
+    print(i, base, base_code)
     if len(base_code) != 8: crash('db error')
     pg.click(206, 62); time.sleep(0.2)
     pc.copy('https://www.familysearch.org/tree/pedigree/fanchart/' + base_code)
@@ -244,4 +279,3 @@ for i in range(427, 436): #436
 
 cursor.close()
 connection.close()
-
