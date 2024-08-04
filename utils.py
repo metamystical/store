@@ -6,24 +6,23 @@ import sys
 import os
 import sqlite3
 
-def open_db(db):
-    global connection, cursor
+def open_db(db): # statics conn and curs are preserved until calling function/program returns/exits
     is_db = False
     if os.path.isfile(db): is_db = True
-    connection = sqlite3.connect('tree.db')
-    cursor = connection.cursor()
+    open_db.conn = sqlite3.connect('tree.db')
+    open_db.curs = open_db.conn.cursor()
     if is_db: print('existing db opened')
     else:
-        cursor.execute('create table tree (id integer primary key autoincrement, code varchar(8) not null, name text, birth_date text, birth_place text, death_date text, death_place text)')
-        cursor.execute('create table chains (chain text not null unique, code varchar(8) not null)')
+        open_db.curs.execute('create table tree (id integer primary key autoincrement, code varchar(8) not null, name text, birth_date text, birth_place text, death_date text, death_place text)')
+        open_db.curs.execute('create table chains (chain text not null unique, code varchar(8) not null)')
         print('new db created')
     return(is_db)
 
 def exec_ret(command, tup): # returns [] if no result, otherwise list of tuples
-    return(cursor.execute(command, tup).fetchall())
+    return(open_db.curs.execute(command, tup).fetchall())
 
 def exec(command, tup):
-    try: cursor.execute(command, tup)
+    try: open_db.curs.execute(command, tup)
     except Exception as e:
         #print(e)
         return(False)
@@ -65,11 +64,11 @@ def get_count(table):
     return(exec_ret(f'select count(*) from {table}', ())[0][0])
 
 def commit():
-    connection.commit()
+    open_db.conn.commit()
 
 def close_db():
-    cursor.close()
-    connection.close()
+    open_db.curs.close()
+    open_db.conn.close()
     print('db closed')
 
 def activate(title):

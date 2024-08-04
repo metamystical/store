@@ -9,45 +9,43 @@ def crash(mess):
     print(mess); utils.close_db(); sys.exit()
 
 def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple, could be ()
-    pc.copy('xyzzy')
-    pg.click(x, y); time.sleep(0.5) # open detail popup
-    pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c') # select all, copy
-    line = pc.paste()
-    for round in range(4): # three tries
-        if round == 3: return(())
-        if line == 'xyzzy':
-            pg.press('esc'); time.sleep(0.5) # close detail popup
-            pg.click(x, y); time.sleep(0.5); pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c')
-            line = pc.paste()
-            continue
-        break
-    offset = 2
-    def get_line(index):
-        lines = pc.paste().splitlines()
-        for round in range(4): # three tries
-            if round == 3: crash('line not found')
-            try: line = lines[index]
-            except Exception as e:
-                time.sleep(0.5); pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c')
-                lines = pc.paste().splitlines()
-                continue
-            break
+    def get_line(index): # statics got_lines and lines are lost when grab() returns
+        if not hasattr(get_line, "got_lines"): get_line.got_lines = False
+        if not get_line.got_lines:
+            pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c') # select all, copy
+            get_line.lines = pc.paste().splitlines()
+        try: line = get_line.lines[index]
+        except Exception as e: crash('line not found at index ' + str(index))
         return(line)
+    for round in range(4): # three tries waiting for detail to appear and be copied
+        if round == 3:
+            pg.press('esc'); time.sleep(0.1) # close detail
+            return(())
+        pc.copy('xyzzy')
+        pg.click(x, y); time.sleep(0.4) # open detail popup
+        pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c') # select all, copy
+        if pc.paste() != 'xyzzy': break
+    offset = 2
     code = ''
     pattern = re.compile('^[A-Z1-9]{4}-[A-Z1-9]{3}$') # for code
-    for round in range(4): # three tries
-        if round == 3: return(())
+    for round in range(4): # three tries waiting for delayed follow link
+        if round == 3:
+            pg.press('esc'); time.sleep(0.1) # close detail
+            return(())
         code1 = get_line(offset + 24)[:-2]
         m1 = bool(pattern.match(code1))
         code2 = get_line(offset + 25)[:-2]
         m2 = bool(pattern.match(code2))
-        if not m1 and not m2: continue
+        if not m1 and not m2:
+            time.sleep(0.4)
+            continue
         if m2: # profile has a picture
              offset += 1
              code = code2
         else: code = code1
         break
-    pg.press('esc'); time.sleep(0.5) # close detail popup
+    pg.press('esc'); time.sleep(0.1) # close detail
+    get_line.got_lines = True
     name = get_line(offset + 23)
     if name.capitalize() == 'Unknown': return(())
     if nofollow: offset -= 1
@@ -72,17 +70,19 @@ def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple,
     if death == -1: crash('death anomoly')
     if sources == -1: crash('sources anomoly')
     def has_digit(date):
-        return bool(re.search(r'\d', date)) or date == 'Living' or date == 'Deceased'
+        return bool(re.search(r'\d', date)) or date.capitalize() == 'Living' or date.capitalize() == 'Deceased'
     def get_pair(start, end):
         date = ''; place = ''
         s1 = start + 1; s2 = start + 2
+        def anomolies(a):
+            return(a.capitalize() == 'Unknown' or a.capitalize() == 'Sep' or a == '?' or a == 'date not given')
         if end > s1:
             a = f[s1]
-            if has_digit(a) or a == 'unknown' or a == 'Sep' or a == 'date not given':
+            if has_digit(a) or anomolies(a):
                 date = a
                 if end > s2: place = f[s2]
             else:
-                if end > s2 or has_digit(a) or a == 'unknown' or a == 'Sep' or a == 'date not given': crash('date anomoly')
+                if end > s2 or anomolies(a): crash('date anomoly:' + a)
                 place = a
         return((date, place))
     birth_date, birth_place = get_pair(birth, death)
@@ -90,13 +90,13 @@ def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple,
     return((code, name, birth_date, birth_place, death_date, death_place))
 
 def grab_center(code): # crash upon fail
-    for round in range(4): # three tries
+    for round in range(4): # three tries moving slightly in center to get to link
         if round == 3: crash('fan not loaded')
         offset = -4 + 8 * round # in case of no last name
         ch, x, y = center # go to center
         tup = grab(x, y + offset, code == '')
         if len(tup) == 0:
-            time.sleep(0.5)
+            time.sleep(0.4)
             continue
         if (code == '' or code == tup[0]): return(tup)
         crash(f'code mismatch {code} vs {tup[0]} at {tup[1]}')
@@ -159,11 +159,11 @@ if not is_db: # grab and insert home fan
     insert(('',) + tup)
     fan('')
 
-generation = 6 # multiples of 6, not including me
+generation = 12 # multiples of 6, not including me #433
 gen = utils.get_gen(generation)
 print(f"Generation {generation}: {len(gen)} ancestors")
-start = 0 # start at 0
-step = 42 # add this to start when ready for next run
+start = 433 # start at 0
+step = 1 # add this to start when ready for next run
 print(f"Gen {generation}: {start} to {start + step - 1} inclusive")
 for i in range(start, start + step):
     base = gen[i]
@@ -171,10 +171,10 @@ for i in range(start, start + step):
     base_code = utils.get_code(base)
     print(i, base, base_code)
     if len(base_code) != 8: crash('db error')
-    pg.click(206, 62); time.sleep(0.5)
+    pg.click(206, 62); time.sleep(0.2)
     pc.copy('https://www.familysearch.org/tree/pedigree/fanchart/' + base_code)
     pg.hotkey('ctrl', 'v'); time.sleep(0.2) # paste
-    pg.press('enter'); time.sleep(5)
+    pg.press('enter'); time.sleep(4.6)
     utils.setup()
     grab_center(base_code) # confirm
     fan(base)
