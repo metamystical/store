@@ -179,9 +179,8 @@ def insert(chain, tup):
         commit()
         return([])
     # ancestor already existed; add every ancestor further up the tree
-    print('ancestor existed', code, chain)
+    #print('ancestor existed', code, chain)
     bases = get_chains(code)
-    print('bases', bases)
     ccss = []
     max_ccs = 0
     for bs in bases:
@@ -190,15 +189,14 @@ def insert(chain, tup):
         if len_ccs > max_ccs:
             max_ccs = len_ccs
             ccss = [(cs[0][len(bs):], cs[1]) for cs in ccs] # strip base
-    print('ccss', ccss)
     skip = []
     for ccs in ccss:
         ch = chain + ccs[0]
-        print('adding:', *ccs, ch)
+        #print('adding:', *ccs, ch)
         insert_chains((ch, ccs[1]))
         skip.append(ch)
     commit()
-    print('skip', skip)
+    #print('skip', skip)
     return(skip)
 
 def fan(sectors, origin): # insert the details of every ancestor in the fan into the db
@@ -255,7 +253,7 @@ def get_sectors():
             sec += 1
     return(sectors)
 
-def main(title, generation, start, step):
+def main(title, generation, start, end):
     sectors = get_sectors()
     center = sectors.pop(0)
     found = False
@@ -281,9 +279,9 @@ def main(title, generation, start, step):
         fan(sectors, '')
     status()
     gen = get_gen(generation)
-    print(f"Generation {generation}: {len(gen)} ancestors")
-    print(f"Gen {generation}: {start} to {start + step - 1} inclusive")
-    for i in range(start, start + step):
+    print(f"Generation {generation}: {len(gen)} remaining lines")
+    print(f"Gen {generation}: {start} to {end - 1} inclusive")
+    for i in range(start, end):
         base = gen[i]
         if len(base) % 6 != 0 or not bool(re.match(r'[FM]*$', base)): crash('bad base')
         base_code = get_code(base)
@@ -298,12 +296,13 @@ def main(title, generation, start, step):
         fan(sectors, base)
         status()
     close_db()
+    print(f"When this round is complete to {generation+6} generations, the maximum number of ancestors is {2*(2**generation - 1)}")
 
 title = 'Dr. John' # title of browser window displaying home fan
-generation = 12 # generation must be multiples of 6
+generation = 24 # generation must be multiples of 6
                 # start at 6 after home fan is grabbed
-start = 200 # start at 0
-step = 227 # add step to start when ready for next round
-# max (start + step) = number of ancestors at beginning of round
-# currently len(gen) == 427 for generation = 12 
-main(title, generation, start, step)
+start = 412 # start at 0
+end = 500 # exclusive; replace start with end when ready for next round
+# max end = number of ancestors at beginning of round
+# currently len(gen) == 2533 for generation = 18 
+main(title, generation, start, end)
