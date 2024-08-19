@@ -14,9 +14,8 @@ def open_db(db): # statics conn and curs are preserved until calling function/pr
     open_db.curs = open_db.conn.cursor()
     if is_db: print('existing db opened')
     else:
-        open_db.curs.execute('create table tree (id integer primary key autoincrement, code varchar(8) not null, name text, birth_date text, birth_place text, death_date text, death_place text)')
-        open_db.curs.execute('create table chains (chain text not null unique, code varchar(8) not null)')
-        open_db.curs.execute('create unique index inx_chain on chains (chain)')
+        open_db.curs.execute("create table tree (code varchar(8) primary key not null unique, name text, birth_date text, birth_place text, death_date text, death_place text, ancestors text)")
+        open_db.curs.execute('create table chains (chain text primary key not null unique, code varchar(8) not null)')
         open_db.curs.execute('create index inx_code on chains (code)')
         print('new db created')
     return(is_db)
@@ -43,7 +42,7 @@ def is_code(code):
     return(len(exec_ret('select code from tree where code = ?', (code,))) >= 1)
 
 def insert_tree(tup):
-    exec('insert into tree (code, name, birth_date, birth_place, death_date, death_place) values (?, ?, ?, ?, ?, ?)', tup)
+    exec('insert into tree (code, name, birth_date, birth_place, death_date, death_place, ancestors) values (?, ?, ?, ?, ?, ?, ?)', tup)
 
 def insert_chains(tup):
     exec('insert into chains (chain, code) values (?, ?)', tup)
@@ -63,13 +62,17 @@ def get_chains(code): # returns list of chain strings
     return(detuple_list(res))
 
 def get_gen(generation): # returns list of chain strings
-    res = exec_ret('select distinct chain from chains where length(chain) = ? order by chain', (generation,))
+    res = exec_ret('select chain from chains where length(chain) = ? order by chain', (generation,))
     return(detuple_list(res))
 
-def get_ccs_with_base(base): # returns list of tuples
-    res = exec_ret("select chain, code from chains where chain like ?", (f'{base}%',))
-    if res == None: return([])
-    return(res)
+def get_ancestors(code): # returns ancestors string
+    res = exec_ret('select ancestors from tree where code = ?', (code,))
+    res = detuple_list(res)
+    if len(res) == 0: return ''
+    return res[0]
+
+def put_ancestors(code, ancestors):
+    open_db.curs.execute("update tree set ancestors = ? WHERE code = ?", (ancestors, code))
 
 def get_count(table):
     return(exec_ret(f'select count(*) from {table}', ())[0][0])
@@ -174,34 +177,49 @@ def grab_center(center, code): # crash upon fail
 def insert(chain, tup):
     code = tup[0]
     if not is_code(code):
-        insert_tree(tup)
+        insert_tree(tup + ('',))
+        commit()
+        generations = min(5, len(chain)) # 5 for a ringmax = 7 generation fan
+        # insert code into ancestors field of up to 5 descendents
+        for i in range(1, generations + 1):
+            ch = chain[:-i]
+            co = get_code(ch)
+            tail = chain[-i:]
+            index = sectors.seq.index(tail)
+            ancestr = get_ancestors(co).split(';')
+            ancestr.pop()
+            el = len(ancestr)
+            if index < el: ancestr[index] = code
+            else:
+                for j in range(el, index): ancestr.append('')
+                ancestr.append(code)
+            ancestors = ';'.join(ancestr) + ';'
+            put_ancestors(co, ancestors)
+            # ancestors field can be cleared after 6 or 12 generations processed
         insert_chains((chain, code))
         commit()
         return([])
     # ancestor already existed; add every ancestor further up the tree
     #print('ancestor existed', code, chain)
-    bases = get_chains(code)
-    ccss = []
-    max_ccs = 0
-    for bs in bases:
-        ccs = get_ccs_with_base(bs)
-        len_ccs = len(ccs)
-        if len_ccs > max_ccs:
-            max_ccs = len_ccs
-            ccss = [(cs[0][len(bs):], cs[1]) for cs in ccs] # strip base
+    ancestr = get_ancestors(code).split(';')
+    ancestr.pop()
+    el = len(ancestr)
     skip = []
-    for ccs in ccss:
-        ch = chain + ccs[0]
-        #print('adding:', *ccs, ch)
-        insert_chains((ch, ccs[1]))
+    for i in range(len(ancestr)):
+        co = ancestr[i]
+        if co == '': continue
+        tail = sectors.seq[i]
+        ch = chain + tail
+        #print('adding:', ch, co)
+        insert_chains((ch, co))
         skip.append(ch)
     commit()
     #print('skip', skip)
     return(skip)
 
-def fan(sectors, origin): # insert the details of every ancestor in the fan into the db
+def fan(origin): # insert the details of every ancestor in the fan into the db
     skip = []
-    for ch, x, y in sectors:
+    for ch, x, y in sectors.secs:
         chain = origin + ch
         if chain in skip: continue
         color = pg.pixel(x, y) # returns RGB triplet
@@ -210,8 +228,8 @@ def fan(sectors, origin): # insert the details of every ancestor in the fan into
         if len(tup) > 0:
             skip += insert(chain, tup)
 
-def get_sectors():
-    # fans should be set to 7 generations and sized to maximum on the screen
+def sectors():
+    # fans should be set to ringmax 7 generations and sized to maximum on the screen
     #   while still having all sectors clickable
     # for calibration, determine x,y screen coordinates of the exact center (ring 0) of the fan
     #   followed by coordinates of the lower left sectors going outward from ring 1 to ring 6
@@ -238,24 +256,25 @@ def get_sectors():
             a = sa + da * i * factor
             ring.append((int(xc + rs[ri] * math.cos(a)), int(yc + rs[ri] * math.sin(a))))
         rings.append(ring)
-    sectors = ['']
+    seq = ['']
     def tree(chain, length):
         if length == 0:
-            sectors.append(chain)
+            seq.append(chain)
             return
         tree(chain + 'F', length - 1)
         tree(chain + 'M', length - 1)
     for length in range(1, len(rings)): tree('', length)
+    sectors.seq = seq[1:]
     sec = 0
     for ri in range(0, len(rings)):
         for i in range(len(rings[ri])):
-            sectors[sec] = (sectors[sec], ) + rings[ri][i]
+            seq[sec] = (seq[sec], ) + rings[ri][i]
             sec += 1
-    return(sectors)
+    sectors.center = seq.pop(0)
+    sectors.secs = seq
 
 def main(title, generation, start, end):
-    sectors = get_sectors()
-    center = sectors.pop(0)
+    sectors()
     found = False
     for window in pg.getAllWindows():
         if re.search('^' + title + '.*', window.title):
@@ -271,12 +290,11 @@ def main(title, generation, start, end):
         pg.click(1247, 137); time.sleep(1) # center the fan
     def status():
         print('#ancestors:', get_count('tree'), get_count('chains'))
-    is_db = open_db('tree.db')
-    if not is_db: # grab and insert home fan
+    if not open_db('tree.db'): # grab and insert home fan
         setup()
-        tup = grab_center(center, '')
+        tup = grab_center(sectors.center, '')
         insert('', tup)
-        fan(sectors, '')
+        fan('')
     status()
     gen = get_gen(generation)
     print(f"Generation {generation}: {len(gen)} remaining lines")
@@ -292,17 +310,17 @@ def main(title, generation, start, end):
         pg.hotkey('ctrl', 'v'); time.sleep(0.2) # paste
         pg.press('enter'); time.sleep(4.6)
         setup()
-        grab_center(center, base_code) # confirm
-        fan(sectors, base)
+        grab_center(sectors.center, base_code) # confirm
+        fan(base)
         status()
     close_db()
-    print(f"When this round is complete to {generation+6} generations, the maximum number of ancestors is {2*(2**generation - 1)}")
+    print(f"When this round is complete to {generation+6} generations, the maximum number of ancestors is {2*(2**(generation+6) - 1)}")
 
 title = 'Dr. John' # title of browser window displaying home fan
 generation = 24 # generation must be multiples of 6
                 # start at 6 after home fan is grabbed
-start = 412 # start at 0
-end = 500 # exclusive; replace start with end when ready for next round
+start = 500 # start at 0
+end = 501 # exclusive; replace start with end when ready for next round
 # max end = number of ancestors at beginning of round
 # currently len(gen) == 2533 for generation = 18 
 main(title, generation, start, end)
