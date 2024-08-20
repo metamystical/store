@@ -10,11 +10,11 @@ import sqlite3
 def open_db(db): # statics conn and curs are preserved until calling function/program returns/exits
     is_db = False
     if os.path.isfile(db): is_db = True
-    open_db.conn = sqlite3.connect('tree.db')
+    open_db.conn = sqlite3.connect(db)
     open_db.curs = open_db.conn.cursor()
     if is_db: print('existing db opened')
     else:
-        open_db.curs.execute("create table tree (code varchar(8) primary key not null unique, name text, birth_date text, birth_place text, death_date text, death_place text, ancestors text)")
+        open_db.curs.execute("create table tree (code varchar(8) primary key not null unique, name text, birth_date text, birth_place text, death_date text, death_place text, ancestors text not null default '')")
         open_db.curs.execute('create table chains (chain text primary key not null unique, code varchar(8) not null)')
         open_db.curs.execute('create index inx_code on chains (code)')
         print('new db created')
@@ -47,27 +47,18 @@ def insert_tree(tup):
 def insert_chains(tup):
     exec('insert into chains (chain, code) values (?, ?)', tup)
 
-def detuple_list(tups):
-    if tups == None: return([])
-    return([tup[0] for tup in tups])
-
 def get_code(chain): # returns code string or empty string if no code found
     res = exec_ret('select code from chains where chain = ?', (chain,))
-    res = detuple_list(res)
+    res = [r[0] for r in res]
     if len(res) == 0: return ''
     return res[0]
 
-def get_chains(code): # returns list of chain strings
-    res = exec_ret("select chain from chains where code = ?", (code,))
-    return(detuple_list(res))
+def get_gen(generation): # returns list of (chain, code) tuples or empty list
+    return(exec_ret('select chain, code from chains where length(chain) = ? order by chain', (generation,)))
 
-def get_gen(generation): # returns list of chain strings
-    res = exec_ret('select chain from chains where length(chain) = ? order by chain', (generation,))
-    return(detuple_list(res))
-
-def get_ancestors(code): # returns ancestors string
+def get_ancestors(code): # returns ancestors string or empty string if no code found
     res = exec_ret('select ancestors from tree where code = ?', (code,))
-    res = detuple_list(res)
+    res = [r[0] for r in res]
     if len(res) == 0: return ''
     return res[0]
 
@@ -174,33 +165,36 @@ def grab_center(center, code): # crash upon fail
         crash(f'code mismatch {code} vs {tup[0]} at {tup[1]}')
         return(tup)
 
+def backfill(chain, code):  # ancestors field in tree table can be cleared
+                            #   after 6 or 12 generations processed
+    generations = min(5, len(chain)) # 5 for a ringmax = 7 generation fan
+    # insert code into ancestors field of up to 5 descendents
+    for i in range(1, generations + 1):
+        co = get_code(chain[:-i])
+        tail = chain[-i:]
+        index = sectors.seq.index(tail)
+        ancestr = get_ancestors(co).split(';')
+        ancestr.pop()
+        el = len(ancestr)
+        if index < el: ancestr[index] = code
+        else:
+            for j in range(el, index): ancestr.append('')
+            ancestr.append(code)
+        ancestors = ';'.join(ancestr) + ';'
+        put_ancestors(co, ancestors)
+    commit()
+
 def insert(chain, tup):
     code = tup[0]
     if not is_code(code):
         insert_tree(tup + ('',))
-        commit()
-        generations = min(5, len(chain)) # 5 for a ringmax = 7 generation fan
-        # insert code into ancestors field of up to 5 descendents
-        for i in range(1, generations + 1):
-            ch = chain[:-i]
-            co = get_code(ch)
-            tail = chain[-i:]
-            index = sectors.seq.index(tail)
-            ancestr = get_ancestors(co).split(';')
-            ancestr.pop()
-            el = len(ancestr)
-            if index < el: ancestr[index] = code
-            else:
-                for j in range(el, index): ancestr.append('')
-                ancestr.append(code)
-            ancestors = ';'.join(ancestr) + ';'
-            put_ancestors(co, ancestors)
-            # ancestors field can be cleared after 6 or 12 generations processed
         insert_chains((chain, code))
-        commit()
+        backfill(chain, code)
         return([])
-    # ancestor already existed; add every ancestor further up the tree
+    # ancestor already existed; add new chain of this and every ancestor further up the tree
     #print('ancestor existed', code, chain)
+    #print('adding:', chain, code)
+    insert_chains((chain, code))
     ancestr = get_ancestors(code).split(';')
     ancestr.pop()
     el = len(ancestr)
@@ -213,7 +207,7 @@ def insert(chain, tup):
         #print('adding:', ch, co)
         insert_chains((ch, co))
         skip.append(ch)
-    commit()
+    backfill(chain, code)
     #print('skip', skip)
     return(skip)
 
@@ -297,10 +291,11 @@ def main(title, generation, start, end):
         fan('')
     status()
     gen = get_gen(generation)
+    #for g in gen: backfill(*g) # used once when backfill introduced gen24
     print(f"Generation {generation}: {len(gen)} remaining lines")
     print(f"Gen {generation}: {start} to {end - 1} inclusive")
     for i in range(start, end):
-        base = gen[i]
+        base = gen[i][0]
         if len(base) % 6 != 0 or not bool(re.match(r'[FM]*$', base)): crash('bad base')
         base_code = get_code(base)
         print(i, base, base_code)
@@ -319,8 +314,8 @@ def main(title, generation, start, end):
 title = 'Dr. John' # title of browser window displaying home fan
 generation = 24 # generation must be multiples of 6
                 # start at 6 after home fan is grabbed
-start = 500 # start at 0
-end = 501 # exclusive; replace start with end when ready for next round
+start = 0 # start at 0
+end = 5 # exclusive; replace start with end when ready for next round
 # max end = number of ancestors at beginning of round
-# currently len(gen) == 2533 for generation = 18 
+# currently len(gen) == 36506 for generation = 24
 main(title, generation, start, end)
