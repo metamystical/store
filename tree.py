@@ -314,8 +314,8 @@ def main(title, generation, start, end):
 title = 'Dr. John' # title of browser window displaying home fan
 generation = 24 # generation must be multiples of 6
                 # start at 6 after home fan is grabbed
-start = 0 # start at 0
-end = 5 # exclusive; replace start with end when ready for next round
+start = 43 # start at 0
+end = 100 # exclusive; replace start with end when ready for next round
 # max end = number of ancestors at beginning of round
 # currently len(gen) == 36506 for generation = 24
 main(title, generation, start, end)
