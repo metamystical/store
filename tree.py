@@ -7,6 +7,8 @@ import sys
 import os
 import sqlite3
 
+code_pattern = re.compile('^[A-Z1-9]{4}-[A-Z1-9]{3}$')
+
 def open_db(db): # statics conn and curs are preserved until calling function/program returns/exits
     is_db = False
     if os.path.isfile(db): is_db = True
@@ -44,17 +46,17 @@ def is_code(code):
 def insert_tree(tup):
     exec('insert into tree (code, name, birth_date, birth_place, death_date, death_place, ancestors) values (?, ?, ?, ?, ?, ?, ?)', tup)
 
-def insert_chains(tup):
-    exec('insert into chains (chain, code) values (?, ?)', tup)
+def delete_tree(code):
+    return(exec('delete from tree where code=?', (code,)))
 
-def get_code(chain): # returns code string or empty string if no code found
-    res = exec_ret('select code from chains where chain = ?', (chain,))
+def update_tree(old, new):
+    return(exec('update tree set code=? where code=?', (new, old)))
+
+def get_name(code):
+    res = exec_ret('select name from tree where code = ?', (code,))
     res = [r[0] for r in res]
     if len(res) == 0: return ''
     return res[0]
-
-def get_gen(generation): # returns list of (chain, code) tuples or empty list
-    return(exec_ret('select chain, code from chains where length(chain) = ? order by chain', (generation,)))
 
 def get_ancestors(code): # returns ancestors string or empty string if no code found
     res = exec_ret('select ancestors from tree where code = ?', (code,))
@@ -64,6 +66,25 @@ def get_ancestors(code): # returns ancestors string or empty string if no code f
 
 def put_ancestors(code, ancestors):
     open_db.curs.execute("update tree set ancestors = ? WHERE code = ?", (ancestors, code))
+
+def insert_chains(tup):
+    exec('insert into chains (chain, code) values (?, ?)', tup)
+
+def update_chains(old, new):
+    return(exec('update chains set code=? where code=?', (new, old)))
+
+def get_chains(code):
+    res = exec_ret('select chain from chains where code = ?', (code,))
+    return(', '.join([r[0] for r in res]))
+
+def get_code(chain): # returns code string or empty string if no code found
+    res = exec_ret('select code from chains where chain = ?', (chain,))
+    res = [r[0] for r in res]
+    if len(res) == 0: return ''
+    return res[0]
+
+def get_gen(generation): # returns list of (chain, code) tuples or empty list
+    return(exec_ret('select chain, code from chains where length(chain) = ? order by chain', (generation,)))
 
 def get_count(table):
     return(exec_ret(f'select count(*) from {table}', ())[0][0])
@@ -75,7 +96,7 @@ def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple,
     def get_line(index): # statics got_lines and lines are lost when grab() returns
         if not hasattr(get_line, "got_lines"): get_line.got_lines = False
         if not get_line.got_lines:
-            pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c') # select all, copy
+            copy(True)
             get_line.lines = pc.paste().splitlines()
         try: line = get_line.lines[index]
         except Exception as e: crash('line not found at index ' + str(index))
@@ -86,19 +107,18 @@ def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple,
             return(())
         pc.copy('xyzzy')
         pg.click(x, y); time.sleep(0.4) # open detail popup
-        pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c') # select all, copy
+        copy(True)
         if pc.paste() != 'xyzzy': break
     offset = 2
     code = ''
-    pattern = re.compile('^[A-Z1-9]{4}-[A-Z1-9]{3}$') # for code
     for round in range(4): # three tries waiting for delayed follow link
         if round == 3:
             pg.press('esc'); time.sleep(0.1) # close detail
             return(())
         code1 = get_line(offset + 24)[:-2]
-        m1 = bool(pattern.match(code1))
+        m1 = bool(code_pattern.match(code1))
         code2 = get_line(offset + 25)[:-2]
-        m2 = bool(pattern.match(code2))
+        m2 = bool(code_pattern.match(code2))
         if not m1 and not m2:
             time.sleep(0.4)
             continue
@@ -138,7 +158,7 @@ def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple,
         date = ''; place = ''
         s1 = start + 1; s2 = start + 2
         def anomolies(a):
-            return(a.capitalize() == 'Unknown' or a.capitalize() == 'Sep' or a == '?' or a == 'date not given')
+            return(a.capitalize() == 'Unknown' or a.capitalize() == 'Sep' or a == 'about' or a == '?' or a == 'date not given')
         if end > s1:
             a = f[s1]
             if has_digit(a) or anomolies(a):
@@ -152,14 +172,74 @@ def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple,
     death_date, death_place = get_pair(death, sources)
     return((code, name, birth_date, birth_place, death_date, death_place))
 
+def url(mode, code, delay):
+        pg.press('esc'); pg.click(172, 60); time.sleep(1)
+        if mode: mode = 'person/details/'
+        else: mode = 'pedigree/fanchart/'
+        pc.copy('https://www.familysearch.org/tree/' + mode + code)
+        pg.hotkey('ctrl', 'v'); time.sleep(1) # paste
+        pg.press('enter'); time.sleep(delay)
+
+def backup(n):
+    for i in range(n):  pg.click(22, 62); time.sleep(1)
+
+def copy(al):
+    if al: pg.hotkey('ctrl', 'a')
+    pg.hotkey('ctrl', 'c'); time.sleep(0.2)
+
+def merger(old, new):
+    if not is_code(old): crash('code not found: ' + old)
+    print('Old name: ' + get_name(old))
+    print('Old chains: ' + get_chains(old))
+    print('New name: ' + get_name(new))
+    print('New chains: ' + get_chains(new))
+    if is_code(new):
+        print('New already exits: ' + new)
+        print('deleting old from tree...')
+        if not delete_tree(old): crash('failed to delete from tree: ' + old)
+    else:
+        print('updating tree...')
+        if not update_tree(old, new): crash('failed to update tree: ' + old)
+    print('updating old chains...')
+    if not update_chains(old, new): crash('failed update chains: ' + old)
+    commit()
+    print('Old name: ' + get_name(old))
+    print('Old chains: ' + get_chains(old))
+    print('New name: ' + get_name(new))
+    print('New chains: ' + get_chains(new))
+
+def merge(code):
+    url(True, code, 8)
+    pg.press('esc'); copy(True)
+    lines = pc.paste().splitlines()
+    p = re.compile('This person was deleted by merge.')
+    for line in lines:
+        if bool(p.match(line)):
+            pg.press('esc'); pg.click(729, 448); time.sleep(4)
+            pg.click(206, 62); time.sleep(0.2)
+            copy(False)
+            match = code_pattern.search(pc.paste()[-8:])
+            backup(1)
+            if match:
+                merger(code, match.group(0))
+                backup(2)
+                return(True)
+            break
+    backup(2)
+    return(False)
+
 def grab_center(center, code): # crash upon fail
-    for round in range(4): # three tries moving slightly in center to get to link
-        if round == 3: crash('fan not loaded')
+    round = 0
+    while True: # three tries moving slightly in center to get to link
+        if round == 3:
+            if not merge(code): crash('fan not loaded')
+            round = 0
         offset = -4 + 8 * round # in case of no last name
         ch, x, y = center # go to center
         tup = grab(x, y + offset, code == '')
         if len(tup) == 0:
             time.sleep(0.4)
+            round += 1
             continue
         if (code == '' or code == tup[0]): return(tup)
         crash(f'code mismatch {code} vs {tup[0]} at {tup[1]}')
@@ -300,10 +380,7 @@ def main(title, generation, start, end):
         base_code = get_code(base)
         print(i, base, base_code)
         if len(base_code) != 8: crash('db error')
-        pg.click(206, 62); time.sleep(0.2)
-        pc.copy('https://www.familysearch.org/tree/pedigree/fanchart/' + base_code)
-        pg.hotkey('ctrl', 'v'); time.sleep(0.2) # paste
-        pg.press('enter'); time.sleep(4.6)
+        url(False, base_code, 5)
         setup()
         grab_center(sectors.center, base_code) # confirm
         fan(base)
@@ -314,8 +391,8 @@ def main(title, generation, start, end):
 title = 'Dr. John' # title of browser window displaying home fan
 generation = 24 # generation must be multiples of 6
                 # start at 6 after home fan is grabbed
-start = 43 # start at 0
-end = 100 # exclusive; replace start with end when ready for next round
+start = 3374 # start at 0
+end = 3500 # exclusive; replace start with end when ready for next round
 # max end = number of ancestors at beginning of round
 # currently len(gen) == 36506 for generation = 24
 main(title, generation, start, end)
