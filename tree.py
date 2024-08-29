@@ -49,8 +49,11 @@ def insert_tree(tup):
 def delete_tree(code):
     return(exec('delete from tree where code=?', (code,)))
 
-def update_tree(old, new):
-    return(exec('update tree set code=? where code=?', (new, old)))
+def update_tree_code(old, new):
+    return(exec('update tree set code = ? where code = ?', (new, old)))
+
+def update_tree_tup(code, tup):
+    return(exec('update tree set name = ?, birth_date = ?, birth_place = ?, death_date = ?, death_place = ? where code = ?', tup[1:] + (code,)))
 
 def get_name(code):
     res = exec_ret('select name from tree where code = ?', (code,))
@@ -180,12 +183,13 @@ def url(mode, code, delay):
         pg.hotkey('ctrl', 'v'); time.sleep(1) # paste
         pg.press('enter'); time.sleep(delay)
 
-def backup(n):
-    for i in range(n):  pg.click(22, 62); time.sleep(1)
-
 def copy(al):
     if al: pg.hotkey('ctrl', 'a')
     pg.hotkey('ctrl', 'c'); time.sleep(0.2)
+
+def setup():
+    pg.click(1275, 303); time.sleep(1) # full screen
+    pg.click(1247, 137); time.sleep(1) # center the fan
 
 def merger(old, new):
     if not is_code(old): crash('code not found: ' + old)
@@ -199,7 +203,7 @@ def merger(old, new):
         if not delete_tree(old): crash('failed to delete from tree: ' + old)
     else:
         print('updating tree...')
-        if not update_tree(old, new): crash('failed to update tree: ' + old)
+        if not update_tree_code(old, new): crash('failed to update tree: ' + old)
     print('updating old chains...')
     if not update_chains(old, new): crash('failed update chains: ' + old)
     commit()
@@ -219,23 +223,25 @@ def merge(code):
             pg.click(206, 62); time.sleep(0.2)
             copy(False)
             match = code_pattern.search(pc.paste()[-8:])
-            backup(1)
             if match:
-                merger(code, match.group(0))
-                backup(2)
-                return(True)
+                match = match.group(0)
+                merger(code, match)
+                url(False, match, 5)
+                setup()
+                tup = grab_center(match)
+                update_tree_tup(match, tup)
+                return(match)
             break
-    backup(2)
-    return(False)
+    crash('fan not loaded')
 
-def grab_center(center, code): # crash upon fail
+def grab_center(code): # crash upon fail
     round = 0
     while True: # three tries moving slightly in center to get to link
         if round == 3:
-            if not merge(code): crash('fan not loaded')
+            code = merge(code) 
             round = 0
         offset = -4 + 8 * round # in case of no last name
-        ch, x, y = center # go to center
+        ch, x, y = sectors.center
         tup = grab(x, y + offset, code == '')
         if len(tup) == 0:
             time.sleep(0.4)
@@ -359,14 +365,11 @@ def main(title, generation, start, end):
     if not found:
         print('window not found:', title)
         sys.exit()
-    def setup():
-        pg.click(1275, 303); time.sleep(1) # full screen
-        pg.click(1247, 137); time.sleep(1) # center the fan
     def status():
         print('#ancestors:', get_count('tree'), get_count('chains'))
     if not open_db('tree.db'): # grab and insert home fan
         setup()
-        tup = grab_center(sectors.center, '')
+        tup = grab_center('')
         insert('', tup)
         fan('')
     status()
@@ -382,7 +385,7 @@ def main(title, generation, start, end):
         if len(base_code) != 8: crash('db error')
         url(False, base_code, 5)
         setup()
-        grab_center(sectors.center, base_code) # confirm
+        grab_center(base_code) # confirm
         fan(base)
         status()
     close_db()
@@ -391,8 +394,8 @@ def main(title, generation, start, end):
 title = 'Dr. John' # title of browser window displaying home fan
 generation = 24 # generation must be multiples of 6
                 # start at 6 after home fan is grabbed
-start = 3374 # start at 0
-end = 3500 # exclusive; replace start with end when ready for next round
+start = 3500 # start at 0
+end = 3528 # exclusive; replace start with end when ready for next round
 # max end = number of ancestors at beginning of round
 # currently len(gen) == 36506 for generation = 24
 main(title, generation, start, end)
