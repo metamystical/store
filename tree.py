@@ -95,84 +95,56 @@ def get_count(table):
 def crash(mess):
     print(mess); close_db(); sys.exit()
 
-def grab(x, y, nofollow): # get the details of an ancestor at x,y; return tuple, could be ()
+def grab(x, y): # get the details of an ancestor at x,y; return tuple, could be ()
     def get_line(index): # statics got_lines and lines are lost when grab() returns
-        if not hasattr(get_line, "got_lines"): get_line.got_lines = False
-        if not get_line.got_lines:
-            copy(True)
-            get_line.lines = pc.paste().splitlines()
-        try: line = get_line.lines[index]
+        try: line = lines[index]
         except Exception as e: crash('line not found at index ' + str(index))
         return(line)
     for round in range(4): # three tries waiting for detail to appear and be copied
-        if round == 3:
-            pg.press('esc'); time.sleep(0.1) # close detail
-            return(())
+        if round == 3: return(())
+        pg.click(x, y); time.sleep(0.5) # open detail popup
+        if pg.pixel(1010, 122) == (221, 223, 223): continue # check colored bar
         pc.copy('xyzzy')
-        pg.click(x, y); time.sleep(0.4) # open detail popup
-        copy(True)
-        if pc.paste() != 'xyzzy': break
-    offset = 2
-    code = ''
-    for round in range(4): # three tries waiting for delayed follow link
-        if round == 3:
-            pg.press('esc'); time.sleep(0.1) # close detail
-            return(())
-        code1 = get_line(offset + 24)[:-2]
-        m1 = bool(code_pattern.match(code1))
-        code2 = get_line(offset + 25)[:-2]
-        m2 = bool(code_pattern.match(code2))
-        if not m1 and not m2:
-            time.sleep(0.4)
-            continue
-        if m2: # profile has a picture
-             offset += 1
-             code = code2
-        else: code = code1
-        break
-    pg.press('esc'); time.sleep(0.1) # close detail
-    get_line.got_lines = True
-    name = get_line(offset + 23)
+        pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c') # select all, copy
+        lines = pc.paste().splitlines()
+        if len(lines) >= 39: break
+    offset = 0
+    pattern = re.compile('^[A-Z1-9]{4}-[A-Z1-9]{3}$') # for code
+    code = get_line(offset + 28)
+    if not bool(pattern.match(code)):
+        offset = 1
+        code = get_line(offset + 28)
+        if not bool(pattern.match(code)): return(())
+    name = get_line(offset + 26)
     if name.capitalize() == 'Unknown': return(())
-    if nofollow: offset -= 1
     f = []
-    f.append(get_line(offset + 26))
-    f.append(get_line(offset + 27))
-    f.append(get_line(offset + 28))
-    f.append(get_line(offset + 29))
-    f.append(get_line(offset + 30))
-    f.append(get_line(offset + 31))
-    f.append(get_line(offset + 32))
-    f.append(get_line(offset + 33))
+    for i in range(offset + 32, offset + 39):  f.append(get_line(i))
     # find markers
-    birth = -1; death = -1; sources = -1
+    birth = -1; death = -1; person = -1
     for i in range(0, len(f)):
-        if f[i] == 'Birth' or f[i] == 'Christening': birth = i
-        if f[i] == 'Death' or f[i] == 'Burial': death = i
-        if f[i] == 'Sources':
-            if not bool(re.match(r'^\d+$', f[i - 1])): crash('sources anomoly')
-            sources = i - 1
+        for j in ['Birth:', 'Christening:']:
+            if f[i][:len(j)] == j: birth = i; f[i] = f[i][len(j):].strip()
+        for j in ['Death:', 'Burial:', 'Living']:
+            if f[i][:len(j)] == j: death = i; f[i] = f[i][len(j):].strip()
+        if f[i] == 'Person': person = i - 2
     if birth == -1: crash('birth anomoly')
     if death == -1: crash('death anomoly')
-    if sources == -1: crash('sources anomoly')
-    def has_digit(date):
-        return bool(re.search(r'\d', date)) or date.capitalize() == 'Living' or date.capitalize() == 'Deceased'
+    if person == -1: crash('person anomoly')
     def get_pair(start, end):
         date = ''; place = ''
-        s1 = start + 1; s2 = start + 2
         def anomolies(a):
-            return(a.capitalize() == 'Unknown' or a.capitalize() == 'Sep' or a == 'about' or a == '?' or a == 'date not given')
-        if end > s1:
-            a = f[s1]
-            if has_digit(a) or anomolies(a):
+            return(bool(re.search(r'\d', a)) or a.capitalize() in ['', 'Deceased', 'Unknown', 'Sep', '?', 'Date not given'])
+        if end > start:
+            a = f[start]
+            if anomolies(a):
                 date = a
-                if end > s2: place = f[s2]
+                if end > start + 1: place = f[start + 1]
             else:
-                if end > s2 or anomolies(a): crash('date anomoly:' + a)
+                if end > start + 1 or anomolies(a): crash('date anomoly:' + a)
                 place = a
         return((date, place))
     birth_date, birth_place = get_pair(birth, death)
-    death_date, death_place = get_pair(death, sources)
+    death_date, death_place = get_pair(death, person)
     return((code, name, birth_date, birth_place, death_date, death_place))
 
 def url(mode, code, delay):
@@ -187,9 +159,10 @@ def copy(al):
     if al: pg.hotkey('ctrl', 'a')
     pg.hotkey('ctrl', 'c'); time.sleep(0.2)
 
-def setup():
-    pg.click(1275, 303); time.sleep(1) # full screen
-    pg.click(1247, 137); time.sleep(1) # center the fan
+def setup(): # must first manually position the fan by hitting home then scroll
+    pg.click(1213, 264); time.sleep(1) # dismiss (temporary)
+    pg.click(1213, 264); time.sleep(1) # full screen
+    pg.click(684, 525); time.sleep(1.5) # open sidebar
 
 def merger(old, new):
     if not is_code(old): crash('code not found: ' + old)
@@ -238,11 +211,11 @@ def grab_center(code): # crash upon fail
     round = 0
     while True: # three tries moving slightly in center to get to link
         if round == 3:
-            code = merge(code) 
+            code = merge(code)
             round = 0
         offset = -4 + 8 * round # in case of no last name
         ch, x, y = sectors.center
-        tup = grab(x, y + offset, code == '')
+        tup = grab(x, y + offset)
         if len(tup) == 0:
             time.sleep(0.4)
             round += 1
@@ -302,11 +275,9 @@ def fan(origin): # insert the details of every ancestor in the fan into the db
     for ch, x, y in sectors.secs:
         chain = origin + ch
         if chain in skip: continue
-        color = pg.pixel(x, y) # returns RGB triplet
-        if color == (242, 242, 242) or color == (232, 232, 232) or color == (216, 216, 216): continue
-        tup = grab(x, y, False)
-        if len(tup) > 0:
-            skip += insert(chain, tup)
+        if pg.pixel(x, y) in [(242, 242, 242), (221, 223, 223)]: continue
+        tup = grab(x, y)
+        if len(tup) > 0: skip += insert(chain, tup)
 
 def sectors():
     # fans should be set to ringmax 7 generations and sized to maximum on the screen
@@ -314,8 +285,8 @@ def sectors():
     # for calibration, determine x,y screen coordinates of the exact center (ring 0) of the fan
     #   followed by coordinates of the lower left sectors going outward from ring 1 to ring 6
     # then determine separately ring 6 lower right (xr, yr)
-    coords = [(684, 535), (641, 502), (596, 526), (546, 545), (474, 576), (406, 608), (330, 640)]
-    xr, yr = (1034, 640) 
+    coords = [(502, 525), (457, 492), (417, 509), (365, 532), (300, 561), (236, 591), (172, 618)]
+    xr, yr = (831, 623)
     xc, yc = coords[0]
     ringmax = 7
     def radius_and_angle(tup):
@@ -331,7 +302,7 @@ def sectors():
     for ri in range(0, ringmax):
         ring = []
         factor = 2 ** (ringmax - 1 - ri)
-        sa = a_ll + da * (factor - 1) / 2 
+        sa = a_ll + da * (factor - 1) / 2
         for i in range(2**ri):
             a = sa + da * i * factor
             ring.append((int(xc + rs[ri] * math.cos(a)), int(yc + rs[ri] * math.sin(a))))
@@ -394,8 +365,8 @@ def main(title, generation, start, end):
 title = 'Dr. John' # title of browser window displaying home fan
 generation = 24 # generation must be multiples of 6
                 # start at 6 after home fan is grabbed
-start = 3500 # start at 0
-end = 3528 # exclusive; replace start with end when ready for next round
+start = 4500 # start at 0
+end = 4501 # exclusive; replace start with end when ready for next round
 # max end = number of ancestors at beginning of round
 # currently len(gen) == 36506 for generation = 24
 main(title, generation, start, end)
