@@ -109,12 +109,11 @@ def grab(x, y): # get the details of an ancestor at x,y; return tuple, could be 
         lines = pc.paste().splitlines()
         if len(lines) >= 39: break
     offset = 0
-    pattern = re.compile('^[A-Z1-9]{4}-[A-Z1-9]{3}$') # for code
     code = get_line(offset + 28)
-    if not bool(pattern.match(code)):
+    if not bool(code_pattern.match(code)):
         offset = 1
         code = get_line(offset + 28)
-        if not bool(pattern.match(code)): return(())
+        if not bool(code_pattern.match(code)): return(())
     name = get_line(offset + 26)
     if name.capitalize() == 'Unknown': return(())
     f = []
@@ -153,15 +152,21 @@ def url(mode, code, delay):
         else: mode = 'pedigree/fanchart/'
         pc.copy('https://www.familysearch.org/tree/' + mode + code)
         pg.hotkey('ctrl', 'v'); time.sleep(1) # paste
-        pg.press('enter'); time.sleep(delay)
+        pg.press('enter')
+        if not mode:
+            for round in range(11): # ten tries waiting for full screen symbol to appear
+                if round == 10: crash('fan did not load')
+                if pg.pixel(1244, 261) == (67, 69, 71) and pg.pixel(1252, 261) == (255, 255, 255) and pg.pixel(1260, 261) == (67, 69, 71): break
+                time.sleep(1)
+        else: time.sleep(delay)
 
 def copy(al):
     if al: pg.hotkey('ctrl', 'a')
     pg.hotkey('ctrl', 'c'); time.sleep(0.2)
 
 def setup(): # must first manually position the fan by hitting home then scroll
-    pg.click(1213, 264); time.sleep(1) # dismiss (temporary)
-    pg.click(1213, 264); time.sleep(1) # full screen
+    pg.click(1256, 266); time.sleep(1) # full screen
+    pg.scroll(120) # scroll up
     pg.click(684, 525); time.sleep(1.5) # open sidebar
 
 def merger(old, new):
@@ -275,7 +280,7 @@ def fan(origin): # insert the details of every ancestor in the fan into the db
     for ch, x, y in sectors.secs:
         chain = origin + ch
         if chain in skip: continue
-        if pg.pixel(x, y) in [(242, 242, 242), (221, 223, 223)]: continue
+        if pg.pixel(x, y) in [(246, 246, 246), (221, 223, 223)]: continue
         tup = grab(x, y)
         if len(tup) > 0: skip += insert(chain, tup)
 
@@ -345,28 +350,33 @@ def main(title, generation, start, end):
         fan('')
     status()
     gen = get_gen(generation)
+    gen_len = len(gen)
+    if end > gen_len: end = gen_len
     #for g in gen: backfill(*g) # used once when backfill introduced gen24
     print(f"Generation {generation}: {len(gen)} remaining lines")
     print(f"Gen {generation}: {start} to {end - 1} inclusive")
     for i in range(start, end):
         base = gen[i][0]
         if len(base) % 6 != 0 or not bool(re.match(r'[FM]*$', base)): crash('bad base')
-        base_code = get_code(base)
+        base_code = gen[i][1]
+        if not bool(code_pattern.match(base_code)): crash('bad base_code')
         print(i, base, base_code)
-        if len(base_code) != 8: crash('db error')
         url(False, base_code, 5)
         setup()
+        pg.press('esc'); pg.click(172, 60); time.sleep(1)
+        pc.copy(f'{i} of {end-1}')
+        pg.hotkey('ctrl', 'v') # paste
         grab_center(base_code) # confirm
         fan(base)
         status()
     close_db()
     print(f"When this round is complete to {generation+6} generations, the maximum number of ancestors is {2*(2**(generation+6) - 1)}")
 
-title = 'Dr. John' # title of browser window displaying home fan
-generation = 24 # generation must be multiples of 6
+title = 'Sheila' # title of browser window displaying home fan
+generation = 18 # generation must be multiples of 6
                 # start at 6 after home fan is grabbed
-start = 4500 # start at 0
-end = 4501 # exclusive; replace start with end when ready for next round
+start = 203 # start at 0
+end = 210 # exclusive; replace start with end when ready for next round
 # max end = number of ancestors at beginning of round
-# currently len(gen) == 36506 for generation = 24
+# currently len(gen) == 648 for generation = 18
 main(title, generation, start, end)
