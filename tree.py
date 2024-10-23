@@ -95,6 +95,41 @@ def get_count(table):
 def crash(mess):
     print(mess); close_db(); sys.exit()
 
+def check_scale(points): # look for blue semicircle
+    for point in points:
+        if pg.pixel(point[0], point[1]) != (91, 197, 222): return False
+    return True
+
+def url(mode, code, delay):
+        pg.press('esc'); pg.click(172, 60); time.sleep(1)
+        if mode: mode = 'person/details/'
+        else: mode = 'pedigree/fanchart/'
+        pc.copy('https://www.familysearch.org/tree/' + mode + code)
+        pg.hotkey('ctrl', 'v'); time.sleep(1) # paste
+        pg.press('enter')
+        if not mode:
+            for round in range(11): # ten tries waiting for full screen symbol to appear
+                if round == 10: crash('fan did not load')
+                if pg.pixel(1244, 261) == (67, 69, 71) and pg.pixel(1252, 261) == (255, 255, 255) and pg.pixel(1260, 261) == (67, 69, 71): break
+                time.sleep(1)
+        else: time.sleep(delay)
+
+def setup():
+    pg.click(1256, 266); time.sleep(1) # full screen
+    pg.scroll(120); time.sleep(0.5) # scroll up
+    if(not check_scale([(651,526), (683,492), (714,526)])):
+        time.sleep(2)
+        pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c') # select all, copy
+        if(bool(re.search('This person was deleted.', pc.paste()))): return(False)
+        else: crash('fan scale wrong')
+    pg.click(684, 530); time.sleep(1.5) # open sidebar
+    return(True)
+
+def fail(code, message):
+    print(f'{code}: {message}')
+    with open('fail.txt', 'a') as file:
+        file.write(f'{code}\n')
+
 def grab(x, y): # get the details of an ancestor at x,y; return tuple, could be ()
     def get_line(index): # statics got_lines and lines are lost when grab() returns
         try: line = lines[index]
@@ -115,7 +150,7 @@ def grab(x, y): # get the details of an ancestor at x,y; return tuple, could be 
         code = get_line(offset + 28)
         if not bool(code_pattern.match(code)): return(())
     name = get_line(offset + 26)
-    if name.capitalize() == 'Unknown': return(())
+    if name.capitalize().startswith('Unknown'): return(())
     f = []
     for i in range(offset + 32, offset + 39):  f.append(get_line(i))
     # find markers
@@ -126,9 +161,9 @@ def grab(x, y): # get the details of an ancestor at x,y; return tuple, could be 
         for j in ['Death:', 'Burial:', 'Living']:
             if f[i][:len(j)] == j: death = i; f[i] = f[i][len(j):].strip()
         if f[i] == 'Person': person = i - 2
-    if birth == -1: crash('birth anomoly')
-    if death == -1: crash('death anomoly')
-    if person == -1: crash('person anomoly')
+    if birth == -1: fail(code, 'birth anomoly}')
+    if death == -1: fail(code, 'death anomoly')
+    if person == -1: fail(code, 'person anomoly')
     def get_pair(start, end):
         date = ''; place = ''
         def anomolies(a):
@@ -139,95 +174,20 @@ def grab(x, y): # get the details of an ancestor at x,y; return tuple, could be 
                 date = a
                 if end > start + 1: place = f[start + 1]
             else:
-                if end > start + 1 or anomolies(a): crash('date anomoly:' + a)
+                if end > start + 1 or anomolies(a): fail(code, f'date anomoly: {a}')
                 place = a
         return((date, place))
     birth_date, birth_place = get_pair(birth, death)
     death_date, death_place = get_pair(death, person)
     return((code, name, birth_date, birth_place, death_date, death_place))
 
-def url(mode, code, delay):
-        pg.press('esc'); pg.click(172, 60); time.sleep(1)
-        if mode: mode = 'person/details/'
-        else: mode = 'pedigree/fanchart/'
-        pc.copy('https://www.familysearch.org/tree/' + mode + code)
-        pg.hotkey('ctrl', 'v'); time.sleep(1) # paste
-        pg.press('enter')
-        if not mode:
-            for round in range(11): # ten tries waiting for full screen symbol to appear
-                if round == 10: crash('fan did not load')
-                if pg.pixel(1244, 261) == (67, 69, 71) and pg.pixel(1252, 261) == (255, 255, 255) and pg.pixel(1260, 261) == (67, 69, 71): break
-                time.sleep(1)
-        else: time.sleep(delay)
-
-def copy(al):
-    if al: pg.hotkey('ctrl', 'a')
-    pg.hotkey('ctrl', 'c'); time.sleep(0.2)
-
-def setup(): # must first manually position the fan by hitting home then scroll
-    pg.click(1256, 266); time.sleep(1) # full screen
-    pg.scroll(120) # scroll up
-    pg.click(684, 525); time.sleep(1.5) # open sidebar
-
-def merger(old, new):
-    if not is_code(old): crash('code not found: ' + old)
-    print('Old name: ' + get_name(old))
-    print('Old chains: ' + get_chains(old))
-    print('New name: ' + get_name(new))
-    print('New chains: ' + get_chains(new))
-    if is_code(new):
-        print('New already exits: ' + new)
-        print('deleting old from tree...')
-        if not delete_tree(old): crash('failed to delete from tree: ' + old)
-    else:
-        print('updating tree...')
-        if not update_tree_code(old, new): crash('failed to update tree: ' + old)
-    print('updating old chains...')
-    if not update_chains(old, new): crash('failed update chains: ' + old)
-    commit()
-    print('Old name: ' + get_name(old))
-    print('Old chains: ' + get_chains(old))
-    print('New name: ' + get_name(new))
-    print('New chains: ' + get_chains(new))
-
-def merge(code):
-    url(True, code, 8)
-    pg.press('esc'); copy(True)
-    lines = pc.paste().splitlines()
-    p = re.compile('This person was deleted by merge.')
-    for line in lines:
-        if bool(p.match(line)):
-            pg.press('esc'); pg.click(729, 448); time.sleep(4)
-            pg.click(206, 62); time.sleep(0.2)
-            copy(False)
-            match = code_pattern.search(pc.paste()[-8:])
-            if match:
-                match = match.group(0)
-                merger(code, match)
-                url(False, match, 5)
-                setup()
-                tup = grab_center(match)
-                update_tree_tup(match, tup)
-                return(match)
-            break
-    crash('fan not loaded')
-
-def grab_center(code): # crash upon fail
-    round = 0
-    while True: # three tries moving slightly in center to get to link
-        if round == 3:
-            code = merge(code)
-            round = 0
-        offset = -4 + 8 * round # in case of no last name
-        ch, x, y = sectors.center
-        tup = grab(x, y + offset)
-        if len(tup) == 0:
-            time.sleep(0.4)
-            round += 1
-            continue
-        if (code == '' or code == tup[0]): return(tup)
-        crash(f'code mismatch {code} vs {tup[0]} at {tup[1]}')
-        return(tup)
+def grab_center(code):
+    ch, x, y = sectors.center
+    tup = grab(x, y)
+    if (code == '' or code == tup[0]): return(tup)
+    if len(tup) == 0:
+        fail(code, f'mismatch: {tup[0]} -> {tup[1]}')
+        return(())
 
 def backfill(chain, code):  # ancestors field in tree table can be cleared
                             #   after 6 or 12 generations processed
@@ -290,8 +250,8 @@ def sectors():
     # for calibration, determine x,y screen coordinates of the exact center (ring 0) of the fan
     #   followed by coordinates of the lower left sectors going outward from ring 1 to ring 6
     # then determine separately ring 6 lower right (xr, yr)
-    coords = [(502, 525), (457, 492), (417, 509), (365, 532), (300, 561), (236, 591), (172, 618)]
-    xr, yr = (831, 623)
+    coords = [(502, 525), (466, 492), (426, 512), (371, 533), (308, 564), (244, 589), (183, 619)]
+    xr, yr = (824, 618)
     xc, yc = coords[0]
     ringmax = 7
     def radius_and_angle(tup):
@@ -362,21 +322,23 @@ def main(title, generation, start, end):
         if not bool(code_pattern.match(base_code)): crash('bad base_code')
         print(i, base, base_code)
         url(False, base_code, 5)
-        setup()
+        if (not setup()):
+            fail(base_code, 'merged')
+            continue
         pg.press('esc'); pg.click(172, 60); time.sleep(1)
         pc.copy(f'{i} of {end-1}')
         pg.hotkey('ctrl', 'v') # paste
-        grab_center(base_code) # confirm
+        tup = grab_center(base_code) # confirm
+        if len(tup) == 0: continue
         fan(base)
         status()
     close_db()
     print(f"When this round is complete to {generation+6} generations, the maximum number of ancestors is {2*(2**(generation+6) - 1)}")
 
-title = 'Sheila' # title of browser window displaying home fan
-generation = 18 # generation must be multiples of 6
-                # start at 6 after home fan is grabbed
-start = 203 # start at 0
-end = 210 # exclusive; replace start with end when ready for next round
-# max end = number of ancestors at beginning of round
-# currently len(gen) == 648 for generation = 18
+title = 'Dr. John' # title of browser window displaying home fan
+generation = 12 # generation must be multiples of 6, start at 6 after home fan is grabbed
+start = 0  # start at 0
+end = 1 # exclusive; replace start with end when ready for next round
+# max end = number of remaining lines
+# currently len(gen) == 409 for generation = 6
 main(title, generation, start, end)
