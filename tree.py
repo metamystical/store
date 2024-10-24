@@ -95,11 +95,6 @@ def get_count(table):
 def crash(mess):
     print(mess); close_db(); sys.exit()
 
-def check_scale(points): # look for blue semicircle
-    for point in points:
-        if pg.pixel(point[0], point[1]) != (91, 197, 222): return False
-    return True
-
 def url(mode, code, delay):
         pg.press('esc'); pg.click(172, 60); time.sleep(1)
         if mode: mode = 'person/details/'
@@ -117,13 +112,18 @@ def url(mode, code, delay):
 def setup():
     pg.click(1256, 266); time.sleep(1) # full screen
     pg.scroll(120); time.sleep(0.5) # scroll up
+    def check_scale(points): # look for blue semicircle
+        for point in points:
+            if pg.pixel(point[0], point[1]) != (91, 197, 222): return False
+        return True
     if(not check_scale([(651,526), (683,492), (714,526)])):
+        print('fan scale wrong')
         time.sleep(2)
         pg.hotkey('ctrl', 'a'); pg.hotkey('ctrl', 'c') # select all, copy
-        if(bool(re.search('This person was deleted.', pc.paste()))): return(False)
-        else: crash('fan scale wrong')
+        if(bool(re.search('This person was deleted.', pc.paste()))): return('merged')
+        else: return('misloaded')
     pg.click(684, 530); time.sleep(1.5) # open sidebar
-    return(True)
+    return('')
 
 def fail(code, message):
     print(f'{code}: {message}')
@@ -181,12 +181,12 @@ def grab(x, y): # get the details of an ancestor at x,y; return tuple, could be 
     death_date, death_place = get_pair(death, person)
     return((code, name, birth_date, birth_place, death_date, death_place))
 
-def grab_center(code):
+def grab_center(code, i):
     ch, x, y = sectors.center
     tup = grab(x, y)
     if (code == '' or code == tup[0]): return(tup)
     if len(tup) == 0:
-        fail(code, f'mismatch: {tup[0]} -> {tup[1]}')
+        fail(code, f'mismatch on fan {i}: {tup[0]} -> {tup[1]}')
         return(())
 
 def backfill(chain, code):  # ancestors field in tree table can be cleared
@@ -322,13 +322,17 @@ def main(title, generation, start, end):
         if not bool(code_pattern.match(base_code)): crash('bad base_code')
         print(i, base, base_code)
         url(False, base_code, 5)
-        if (not setup()):
+        outcome = setup()
+        if (outcome == 'merged'):
             fail(base_code, 'merged')
             continue
+        if (outcome == 'misloaded'): # try once more
+            url(False, base_code, 5)
+            if setup() != '': crash('second try')
         pg.press('esc'); pg.click(172, 60); time.sleep(1)
         pc.copy(f'{i} of {end-1}')
         pg.hotkey('ctrl', 'v') # paste
-        tup = grab_center(base_code) # confirm
+        tup = grab_center(base_code, i) # confirm
         if len(tup) == 0: continue
         fan(base)
         status()
@@ -337,8 +341,8 @@ def main(title, generation, start, end):
 
 title = 'Dr. John' # title of browser window displaying home fan
 generation = 12 # generation must be multiples of 6, start at 6 after home fan is grabbed
-start = 0  # start at 0
-end = 1 # exclusive; replace start with end when ready for next round
+start = 87  # start at 0
+end = 409 # exclusive; replace start with end when ready for next round
 # max end = number of remaining lines
 # currently len(gen) == 409 for generation = 6
 main(title, generation, start, end)
